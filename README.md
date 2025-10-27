@@ -25,6 +25,7 @@ Checkpoints for VRNN are named as "VRNN\_3883videos_vox_{# input frames}_{# outp
 The log subfolder is the directory for saving generated videos.
 
 The two pickle files are the keypoints corresponding to 44 VoxCeleb videos during inference for source image and driving video frames.
+To calculate JEDi, JEDi.py can be used after generating the videos and some trained models need to be downloaded in "videojedi_models" folder as instructed.
 ## Checkpoints for the FOMM model and keypoints 
 Checkpoints for the FOMM model trained on the VoxCeleb dataset can be found under this google drive link. 
 https://drive.google.com/drive/folders/1pachVtWHibzDi3E61jUmqFfz2hVxA1GX?usp=drive_link.
@@ -34,4 +35,4 @@ https://github.com/AliaksandrSiarohin/first-order-model.
 
 To run this file in the attached Jupyter notebooks, please copy the checkpoint file to the following path "Training_Prediction/FOMM/Trained_Models/".
 
-The keypoints corresponding to 3883 VoxCeleb videos which can be used to train the RNN/VAE/VRNN can be found with the same google drive link.
+The keypoints corresponding to 3883 VoxCeleb videos which can be used to train the VRNN can be found with the same google drive link.
