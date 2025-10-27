@@ -1,7 +1,7 @@
 # Motion-Transfer-Keypoints-Prediction
 
 ## Description of the repository:
-This is a repo containing files related to keypoint prediction and video generation using RNN/VAE/VRNN in the First Order Motion Model (FOMM) pipeline. 
+This is a repo containing files related to keypoint prediction and video generation using VRNN in the First Order Motion Model (FOMM) pipeline. 
 
 ## Directory Contents:
 
