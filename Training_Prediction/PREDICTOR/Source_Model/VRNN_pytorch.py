@@ -468,10 +468,15 @@ def vrnn_iteration(cfg, input_kp, rnn_state, rnn_cell,
     else:
         z_all, kp_all, z, output_flat = sample_all(mean, std, rnn_state, observed_kp_flat)
         output_kp = kp_all.view(cfg.num_samples, B, N, D)  # [S,B,N,D]
+        output_flat = output_flat.view(B, -1)
 
     # Update RNN
-    rnn_input = torch.cat([observed_kp_flat, z], dim=-1)
-    rnn_state = rnn_cell(rnn_input, rnn_state)
+    if training:
+        rnn_input = torch.cat([observed_kp_flat, z], dim=-1)
+        rnn_state = rnn_cell(rnn_input, rnn_state)
+    else:
+        rnn_input = torch.cat([output_flat, z], dim=-1)
+        rnn_state = rnn_cell(rnn_input, rnn_state)
 
     return output_kp, rnn_state, kl
 
