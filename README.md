@@ -19,7 +19,7 @@ https://github.com/AliaksandrSiarohin/first-order-model.
 
 The config subfolder contains the yaml file for the VoxCeleb dataset.
 
-The checkpoints subfolder contains the trained VRNN keypoints prediction models using prediction horizons of 6 or 12 for VRNN.
+The checkpoints subfolder contains the trained VRNN keypoins prediction models using prediction horizons of 6 or 12 for VRNN.
 Checkpoints for VRNN are named as "VRNN\_3883videos_vox_{# input frames}_{# output frames}" where {# input frames} and {# output frames} can be 6/12 indicates types of prediction.
 
 The log subfolder is the directory for saving generated videos.
@@ -37,3 +37,5 @@ https://github.com/AliaksandrSiarohin/first-order-model.
 To run this file in the attached Jupyter notebooks, please copy the checkpoint file to the following path "Training_Prediction/FOMM/Trained_Models/".
 
 The keypoints corresponding to 3883 VoxCeleb videos which can be used to train the VRNN can be found with the same google drive link.
+
+The VRNN code is taken from https://github.com/xuebai95/Motion-Transfer-Keypoints-Prediction/tree/main and converted to pytorch.
