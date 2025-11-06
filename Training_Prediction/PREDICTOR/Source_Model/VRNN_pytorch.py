@@ -471,12 +471,8 @@ def vrnn_iteration(cfg, input_kp, rnn_state, rnn_cell,
         output_flat = output_flat.view(B, -1)
 
     # Update RNN
-    if training:
-        rnn_input = torch.cat([observed_kp_flat, z], dim=-1)
-        rnn_state = rnn_cell(rnn_input, rnn_state)
-    else:
-        rnn_input = torch.cat([output_flat, z], dim=-1)
-        rnn_state = rnn_cell(rnn_input, rnn_state)
+    rnn_input = torch.cat([observed_kp_flat, z], dim=-1)
+    rnn_state = rnn_cell(rnn_input, rnn_state)
 
     return output_kp, rnn_state, kl
 
