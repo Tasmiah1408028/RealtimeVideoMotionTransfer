@@ -302,21 +302,24 @@ def get_config():
     cfg.batch_size = 32
     cfg.steps_per_epoch = 50
     cfg.num_epochs = 15
-    cfg.learning_rate = 0.001
+    cfg.learning_rate = 0.0001 #0.001
     cfg.clipnorm = 10
 
-    cfg.observed_steps = 6
-    cfg.predicted_steps = 6
-    cfg.num_keypoints = 10
-    cfg.num_rnn_units = 256
+    # Short non-overlap block settings (kept for compatibility)
+    cfg.observed_steps = 120
+    cfg.predicted_steps = 30
+
+    cfg.num_keypoints = 30
+    cfg.num_rnn_units = 64 #256
     cfg.prior_net_dim = 128
     cfg.posterior_net_dim = 128
-    cfg.latent_code_size = 20
+    cfg.decoder_dim = 128
+    cfg.latent_code_size = 15 #20
     cfg.kl_loss_scale = 0.0001
     cfg.kl_annealing_steps = 1000
 
-    cfg.num_samples_for_bom = 10   # Best-of-Many samples
-    cfg.num_samples = 100          # Samples at inference
+    cfg.num_samples_for_bom = 50 #10   # Best-of-Many samples (training)
+    cfg.num_samples = 100          # Inference samples per step
     cfg.use_deterministic_belief = False
     return cfg
 
@@ -476,7 +479,46 @@ def vrnn_iteration(cfg, input_kp, rnn_state, rnn_cell,
 
     return output_kp, rnn_state, kl
 
+def vrnn_iteration_pred(cfg, input_kp, rnn_state, rnn_cell,
+                   prior_net, decoder,
+                   posterior_net=None,
+                   sample_best=None, sample_all=None, kl_module=None,
+                   training=True):
+    """
+    input_kp: [B, N, D]
+    rnn_state: [B, H]
+    """
+    B, N, D = input_kp.shape
+    observed_kp_flat = input_kp.view(B, -1)  # [B, N*D]
 
+    # Prior & Posterior
+    mean_prior, std_prior = prior_net(rnn_state)
+    if posterior_net is not None:
+        mean, std = posterior_net(rnn_state, observed_kp_flat)
+        kl = kl_module(mean_prior, std_prior, mean, std) if kl_module is not None else None
+    else:
+        mean, std = mean_prior.detach(), std_prior.detach()
+        kl = None
+
+    # Sampling / decoding
+    if training:
+        z, output_flat = sample_best(mean, std, rnn_state, observed_kp_flat)  # [B,L], [B,N*D]
+        output_kp = output_flat.view(B, N, D)
+    else:
+        z_all, kp_all, z, output_flat = sample_all(mean, std, rnn_state, observed_kp_flat)
+        output_kp = kp_all.view(cfg.num_samples, B, N, D)  # [S,B,N,D]
+        output_flat = output_flat.view(B, -1)
+
+    # Update RNN state (uses the single z chosen above)
+    if training:
+        rnn_input = torch.cat([observed_kp_flat, z], dim=-1)
+        rnn_state = rnn_cell(rnn_input, rnn_state)
+    else:
+        rnn_input = torch.cat([output_flat, z], dim=-1)
+        rnn_state = rnn_cell(rnn_input, rnn_state)
+
+    return output_kp, rnn_state, kl
+                       
 # ========= VRNN Model =========
 class VRNN(nn.Module):
     def __init__(self, cfg):
@@ -523,7 +565,7 @@ class VRNN(nn.Module):
 
         # Predicted steps
         for t in range(self.cfg.observed_steps, T):
-            out, rnn_state, _ = vrnn_iteration(
+            out, rnn_state, _ = vrnn_iteration_pred(
                 self.cfg, x[:, t], rnn_state,
                 self.rnn_cell, self.prior_net, self.decoder,
                 posterior_net=None,
