@@ -306,8 +306,8 @@ def get_config():
     cfg.clipnorm = 10
 
     # Short non-overlap block settings (kept for compatibility)
-    cfg.observed_steps = 120
-    cfg.predicted_steps = 30
+    cfg.observed_steps = 6
+    cfg.predicted_steps = 6
 
     cfg.num_keypoints = 30
     cfg.num_rnn_units = 64 #256
