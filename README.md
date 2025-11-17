@@ -37,5 +37,3 @@ https://github.com/AliaksandrSiarohin/first-order-model.
 To run this file in the attached Jupyter notebooks, please copy the checkpoint file to the following path "Training_Prediction/FOMM/Trained_Models/".
 
 The keypoints corresponding to 3883 VoxCeleb videos which can be used to train the VRNN can be found with the same google drive link.
-
-The VRNN code is taken from https://github.com/xuebai95/Motion-Transfer-Keypoints-Prediction/tree/main and converted to pytorch.
