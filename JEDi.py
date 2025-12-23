@@ -153,7 +153,7 @@ class Generated_VideoDataset(BaseVideoDataset):
         #frames = self._truncate_to_multiple_of_12(frames)
 
         # Apply padding
-        frames = self._pad_to_1224_frames(frames)
+        #frames = self._pad_to_1224_frames(frames)
 
         #print(f"✅ Video: {file_path}, Frames After Processing: {frames.shape[0]}")
 
@@ -164,8 +164,8 @@ class Generated_VideoDataset(BaseVideoDataset):
 
 
 # 🔹 Define paths to real and generated video folders
-real_folder = "./Training_Prediction/FOMM/datasets/vox/test_recon"  # Change this to actual folder
-generated_folder = "/home/jovyan/srinjoy-vol/Motion-Transfer-Keypoints-Prediction/Keypoints_Prediction/log/test-reconstruction-vox/prediction/VRNN_voxtransfer_12-12_pytorch"  # Change this to actual folder
+real_folder = "./Training_Prediction/FOMM/datasets/bair/test_recon"  # Change this to actual folder
+generated_folder = "./log/test-reconstruction-bair/prediction/VRNN_bairtransfer_15-15"  # Change this to actual folder
 
 # 🔹 Get common filenames after normalizing
 common_files = get_common_filenames(real_folder, generated_folder)
@@ -190,7 +190,7 @@ from videojedi import JEDiMetric
 jedi = JEDiMetric(feature_path=".", model_dir="./videojedi_models")  # You can specify a different model directory if needed
 
 # Step 2: Extract features from real and generated videos
-jedi.load_features(train_loader=real_loader, test_loader=generated_loader, num_samples=44)  # Adjust num_samples if needed
+jedi.load_features(train_loader=real_loader, test_loader=generated_loader, num_samples=256)  # Adjust num_samples if needed
 
 # Step 3: Compute JEDi Score
 jedi_score = jedi.compute_metric()
