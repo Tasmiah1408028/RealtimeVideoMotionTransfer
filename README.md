@@ -19,7 +19,7 @@ https://github.com/AliaksandrSiarohin/first-order-model.
 
 The config subfolder contains the yaml file for the Bair dataset.
 
-The checkpoints subfolder contains the trained VRNN keypoins prediction models using prediction horizons of 6 or 12 for VRNN.
+The checkpoints subfolder contains the trained VRNN keypoins prediction models using prediction horizons of 15 for VRNN.
 Checkpoints for VRNN are named as "VRNN\_5001videos_bair_{# input frames}_{# output frames}" where {# input frames} and {# output frames} is 15 here.
 
 The log subfolder is the directory for saving generated videos.
