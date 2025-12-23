@@ -1,282 +1,4 @@
-# import torch
-# import torch.nn as nn
-# import torch.nn.functional as F
-# from torch.distributions import Normal, kl_divergence
-
-
-# # =============== Config Dict ===============
-# class ConfigDict(dict):
-#     def __getattr__(self, name):
-#         try:
-#             return self[name]
-#         except KeyError:
-#             raise AttributeError(name)
-
-#     def __setattr__(self, name, value):
-#         self[name] = value
-
-#     def get(self, key, default=None):
-#         return super().get(key, default)
-
-
-# # =============== Config ===============
-# def get_config():
-#     cfg = ConfigDict()
-
-#     # Training
-#     cfg.batch_size = 32
-#     cfg.steps_per_epoch = 50
-#     cfg.num_epochs = 15
-#     cfg.learning_rate = 0.001
-#     cfg.clipnorm = 10
-
-#     # Sequence
-#     cfg.observed_steps = 6
-#     cfg.predicted_steps = 6
-#     cfg.num_keypoints = 10
-
-#     # Dynamics
-#     cfg.num_rnn_units = 256
-#     cfg.prior_net_dim = 128
-#     cfg.posterior_net_dim = 128
-#     cfg.latent_code_size = 20
-#     cfg.kl_loss_scale = 0.0001
-#     cfg.kl_annealing_steps = 1000
-#     cfg.use_deterministic_belief = False
-#     cfg.num_samples_for_bom = 10
-
-#     # Scheduled Sampling
-#     cfg.scheduled_sampling_ramp_steps = cfg.steps_per_epoch * int(cfg.num_epochs * 0.8)
-#     cfg.scheduled_sampling_p_true_start_obs = 1.0
-#     cfg.scheduled_sampling_p_true_end_obs = 0.1
-#     cfg.scheduled_sampling_p_true_start_pred = 1.0
-#     cfg.scheduled_sampling_p_true_end_pred = 0.5
-
-#     return cfg
-
-
-# # =============== Prior Net ===============
-# class PriorNet(nn.Module):
-#     def __init__(self, cfg):
-#         super().__init__()
-#         self.fc1 = nn.Linear(cfg.num_rnn_units, cfg.prior_net_dim)
-#         self.means = nn.Linear(cfg.prior_net_dim, cfg.latent_code_size)
-#         self.stds = nn.Linear(cfg.prior_net_dim, cfg.latent_code_size)
-
-#     def forward(self, rnn_state):
-#         hidden = F.relu(self.fc1(rnn_state))
-#         mean = self.means(hidden)
-#         std = F.softplus(self.stds(hidden)) + 1e-4
-#         return mean, std
-
-
-# # =============== Posterior Net ===============
-# class PosteriorNet(nn.Module):
-#     def __init__(self, cfg):
-#         super().__init__()
-#         self.fc1 = nn.Linear(cfg.num_rnn_units + cfg.num_keypoints * 6, cfg.posterior_net_dim)
-#         self.means = nn.Linear(cfg.posterior_net_dim, cfg.latent_code_size)
-#         self.stds = nn.Linear(cfg.posterior_net_dim, cfg.latent_code_size)
-
-#     def forward(self, rnn_state, keypoints_flat):
-#         hidden = F.relu(self.fc1(torch.cat([rnn_state, keypoints_flat], dim=-1)))
-#         mean = self.means(hidden)
-#         std = F.softplus(self.stds(hidden)) + 1e-4
-#         return mean, std
-
-
-# # =============== Decoder ===============
-# class Decoder(nn.Module):
-#     def __init__(self, cfg):
-#         super().__init__()
-#         self.fc1 = nn.Linear(cfg.num_rnn_units + cfg.latent_code_size, 128)
-#         self.fc2 = nn.Linear(128, cfg.num_keypoints * 6)
-
-#     def forward(self, rnn_state, latent_code):
-#         hidden = F.relu(self.fc1(torch.cat([rnn_state, latent_code], dim=-1)))
-#         keypoints = torch.tanh(self.fc2(hidden))
-#         return keypoints
-
-
-# # =============== Scheduled Sampling ===============
-# class ScheduledSampling(nn.Module):
-#     def __init__(self, p_true_start=1.0, p_true_end=0.2, ramp_steps=10000):
-#         super().__init__()
-#         self.p_true_start = p_true_start
-#         self.p_true_end = p_true_end
-#         self.ramp_steps = ramp_steps
-#         self.train_step = 0
-
-#     def forward(self, true, pred):
-#         ramp = min(self.train_step / self.ramp_steps, 1.0)
-#         p_true = self.p_true_start - (self.p_true_start - self.p_true_end) * ramp
-#         self.train_step += 1
-#         if self.training and torch.rand(1).item() < p_true:
-#             return true
-#         return pred
-
-
-# # =============== Best-of-Many Sampling ===============
-# class SampleBestBelief(nn.Module):
-#     """
-#     Implements Best-of-Many sampling objective.
-#     """
-
-#     def __init__(self, num_samples, decoder, use_mean_instead_of_sample=False):
-#         super().__init__()
-#         self.num_samples = num_samples
-#         self.decoder = decoder
-#         self.use_mean_instead_of_sample = use_mean_instead_of_sample
-
-#     def forward(self, latent_mean, latent_std, rnn_state, observed_keypoints_flat):
-#         B = latent_mean.size(0)
-
-#         # draw latent samples
-#         if self.use_mean_instead_of_sample:
-#             sampled_latent = latent_mean.unsqueeze(0).repeat(self.num_samples, 1, 1)
-#         else:
-#             dist = Normal(latent_mean, latent_std)
-#             sampled_latent = dist.rsample((self.num_samples,))  # [S,B,L]
-
-#         # decode samples
-#         sampled_keypoints = []
-#         for i in range(self.num_samples):
-#             kp_flat = self.decoder(rnn_state, sampled_latent[i])  # [B,N*6]
-#             sampled_keypoints.append(kp_flat)
-#         sampled_keypoints = torch.stack(sampled_keypoints, dim=0)
-
-#         # if only one sample
-#         if self.num_samples == 1:
-#             return sampled_latent[0], sampled_keypoints[0]
-
-#         # compute sample losses [S,B]
-#         sample_losses = ((sampled_keypoints - observed_keypoints_flat.unsqueeze(0)) ** 2).mean(-1)
-
-#         return choose_sample(sampled_latent, sampled_keypoints, sample_losses, self.training)
-
-
-# def choose_sample(sampled_latent, sampled_keypoints, sample_losses, training=True):
-#     if training:
-#         best_idx = torch.argmin(sample_losses, dim=0)  # [B]
-#         batch_idx = torch.arange(sampled_latent.size(1), device=sampled_latent.device)
-#         best_latent = sampled_latent[best_idx, batch_idx]
-#         best_keypoints = sampled_keypoints[best_idx, batch_idx]
-#     else:
-#         best_latent = sampled_latent[0]
-#         best_keypoints = sampled_keypoints[0]
-
-#     return best_latent, best_keypoints
-
-
-# # =============== One Iteration of VRNN ===============
-# def vrnn_iteration(cfg, input_kp, rnn_state, rnn_cell,
-#                    prior_net, decoder, sample_layer=None,
-#                    posterior_net=None, scheduled_sampler=None):
-#     B, N, D = input_kp.shape
-#     observed_kp_flat = input_kp.view(B, -1)
-
-#     mean_prior, std_prior = prior_net(rnn_state)
-#     if posterior_net:
-#         mean, std = posterior_net(rnn_state, observed_kp_flat)
-#         kl = kl_divergence(Normal(mean, std), Normal(mean_prior, std_prior)).sum(-1)
-#     else:
-#         mean, std = mean_prior.detach(), std_prior.detach()
-#         kl = None
-
-#     # latent + decode
-#     if sample_layer is not None:
-#         z, output_flat = sample_layer(mean, std, rnn_state, observed_kp_flat)
-#     else:
-#         z = Normal(mean, std).rsample()
-#         output_flat = decoder(rnn_state, z)
-
-#     output_kp = output_flat.view(B, N, D)
-
-#     # scheduled sampling for RNN input
-#     rnn_input_kp = observed_kp_flat
-#     if scheduled_sampler is not None:
-#         rnn_input_kp = scheduled_sampler(observed_kp_flat, output_flat)
-
-#     rnn_input = torch.cat([rnn_input_kp, z], dim=-1)
-#     rnn_state = rnn_cell(rnn_input, rnn_state)
-
-#     return output_kp, rnn_state, kl
-
-
-# # =============== VRNN Model ===============
-# class VRNN(nn.Module):
-#     def __init__(self, cfg):
-#         super().__init__()
-#         self.cfg = cfg
-#         self.rnn_cell = nn.GRUCell(cfg.num_keypoints * 6 + cfg.latent_code_size, cfg.num_rnn_units)
-#         self.prior_net = PriorNet(cfg)
-#         self.posterior_net = PosteriorNet(cfg)
-#         self.decoder = Decoder(cfg)
-
-#         self.sample_layer = SampleBestBelief(
-#             cfg.num_samples_for_bom,
-#             self.decoder,
-#             use_mean_instead_of_sample=cfg.use_deterministic_belief
-#         )
-
-#         self.sched_sampler_obs = ScheduledSampling(
-#             cfg.scheduled_sampling_p_true_start_obs,
-#             cfg.scheduled_sampling_p_true_end_obs,
-#             cfg.scheduled_sampling_ramp_steps
-#         )
-#         self.sched_sampler_pred = ScheduledSampling(
-#             cfg.scheduled_sampling_p_true_start_pred,
-#             cfg.scheduled_sampling_p_true_end_pred,
-#             cfg.scheduled_sampling_ramp_steps
-#         )
-
-#     def forward(self, x):
-#         """
-#         x: [B, T, num_keypoints, 6]
-#         Returns: output keypoints [B, T, num_keypoints, 6], KL stack [B, T_obs]
-#         """
-#         B, T, N, D = x.shape
-#         rnn_state = torch.zeros(B, self.cfg.num_rnn_units, device=x.device)
-#         outputs, kls = [], []
-
-#         # observed steps
-#         for t in range(self.cfg.observed_steps):
-#             out, rnn_state, kl = vrnn_iteration(
-#                 self.cfg, x[:, t], rnn_state, self.rnn_cell,
-#                 self.prior_net, self.decoder,
-#                 sample_layer=self.sample_layer,
-#                 posterior_net=self.posterior_net,
-#                 scheduled_sampler=self.sched_sampler_obs
-#             )
-#             outputs.append(out)
-#             kls.append(kl)
-
-#         # predicted steps
-#         for t in range(self.cfg.observed_steps, T):
-#             out, rnn_state, _ = vrnn_iteration(
-#                 self.cfg, x[:, t], rnn_state, self.rnn_cell,
-#                 self.prior_net, self.decoder,
-#                 sample_layer=self.sample_layer,
-#                 posterior_net=None,
-#                 scheduled_sampler=self.sched_sampler_pred
-#             )
-#             outputs.append(out)
-
-#         output_stack = torch.stack(outputs, dim=1)
-#         kl_stack = torch.stack(kls, dim=1) if len(kls) > 0 else None
-#         return output_stack, kl_stack
-
-# def l2_loss_tf_style(pred, target):
-#     diff = pred - target
-#     return 0.5 * torch.sum(diff ** 2) / (target.shape[0] * target.shape[1])
-
-# # =============== Weight Init ===============
-# def init_weights(m):
-#     if isinstance(m, nn.Linear):
-#         nn.init.xavier_uniform_(m.weight)
-#         if m.bias is not None:
-#             nn.init.zeros_(m.bias)
-
+# vrnn_overlap_all_samples.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -302,20 +24,20 @@ def get_config():
     cfg.batch_size = 32
     cfg.steps_per_epoch = 50
     cfg.num_epochs = 15
-    cfg.learning_rate = 0.0001 #0.001
+    cfg.learning_rate = 3e-4 #0.0001 #0.001
     cfg.clipnorm = 10
 
     # Short non-overlap block settings (kept for compatibility)
-    cfg.observed_steps = 6
-    cfg.predicted_steps = 6
+    cfg.observed_steps = 5
+    cfg.predicted_steps = 20
 
-    cfg.num_keypoints = 30
-    cfg.num_rnn_units = 64 #256
-    cfg.prior_net_dim = 128
-    cfg.posterior_net_dim = 128
-    cfg.decoder_dim = 128
-    cfg.latent_code_size = 15 #20
-    cfg.kl_loss_scale = 0.0001
+    cfg.num_keypoints = 10
+    cfg.num_rnn_units = 128 #64 #256
+    cfg.prior_net_dim = 512 #128
+    cfg.posterior_net_dim = 512 #128
+    cfg.decoder_dim = 512 #128
+    cfg.latent_code_size = 15
+    cfg.kl_loss_scale = 3e-5 #0.0001
     cfg.kl_annealing_steps = 1000
 
     cfg.num_samples_for_bom = 50 #10   # Best-of-Many samples (training)
@@ -342,7 +64,7 @@ class PriorNet(nn.Module):
 class PosteriorNet(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.fc1 = nn.Linear(cfg.num_rnn_units + cfg.num_keypoints * 6,
+        self.fc1 = nn.Linear(cfg.num_rnn_units + cfg.num_keypoints*6,
                              cfg.posterior_net_dim)
         self.means = nn.Linear(cfg.posterior_net_dim, cfg.latent_code_size)
         self.stds = nn.Linear(cfg.posterior_net_dim, cfg.latent_code_size)
@@ -357,8 +79,8 @@ class PosteriorNet(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.fc1 = nn.Linear(cfg.num_rnn_units + cfg.latent_code_size, 128)
-        self.fc2 = nn.Linear(128, cfg.num_keypoints * 6)
+        self.fc1 = nn.Linear(cfg.num_rnn_units + cfg.latent_code_size, cfg.decoder_dim)
+        self.fc2 = nn.Linear(cfg.decoder_dim, cfg.num_keypoints*6)
 
     def forward(self, rnn_state, latent_code):
         h = F.relu(self.fc1(torch.cat([rnn_state, latent_code], dim=-1)))
@@ -385,15 +107,15 @@ class SampleBestBelief(nn.Module):
         # Decode samples
         sampled_keypoints = []
         for i in range(self.num_samples):
-            kp_flat = self.decoder(rnn_state, sampled_latent[i])  # [B,N*6]
+            kp_flat = self.decoder(rnn_state, sampled_latent[i])  # [B,N*3]
             sampled_keypoints.append(kp_flat)
-        sampled_keypoints = torch.stack(sampled_keypoints, dim=0)  # [S,B,N*6]
+        sampled_keypoints = torch.stack(sampled_keypoints, dim=0)  # [S,B,N*3]
 
-        # Loss for each sample
-        obs = observed_kp_flat.unsqueeze(0)  # [1,B,N*6]
+        # Loss for each sample (MSE vs observed)
+        obs = observed_kp_flat.unsqueeze(0)  # [1,B,N*3]
         losses = ((sampled_keypoints - obs) ** 2).mean(dim=-1)  # [S,B]
 
-        # Best sample per batch
+        # Best sample per batch element
         best_idx = torch.argmin(losses, dim=0)  # [B]
         best_latent = sampled_latent[best_idx, torch.arange(B)]
         best_kp = sampled_keypoints[best_idx, torch.arange(B)]
@@ -408,22 +130,23 @@ class SampleAllBeliefs(nn.Module):
         self.decoder = decoder
         self.use_mean_instead_of_sample = use_mean_instead_of_sample
 
-    def forward(self, mean, std, rnn_state, observed_kp_flat):
+    def forward(self, mean, std, rnn_state):
         B = mean.size(0)
-        if self.use_mean_instead_of_sample:
-            sampled_latent = mean.unsqueeze(0).repeat(self.num_samples, 1, 1)
-        else:
-            dist = Normal(mean, std)
-            sampled_latent = dist.rsample((self.num_samples,))  # [S,B,L]
-
+        #if self.use_mean_instead_of_sample:
+        sampled_latent_mean = mean #.unsqueeze(0) #.repeat(self.num_samples, 1, 1)
+        #else:
+        dist = Normal(mean, std)
+        sampled_latent = dist.rsample((self.num_samples,))  # [S,B,L]
+        sampled_keypoint_mean = self.decoder(rnn_state, sampled_latent_mean)
         # Decode all
         sampled_keypoints = []
         for i in range(self.num_samples):
-            kp_flat = self.decoder(rnn_state, sampled_latent[i])
+            kp_flat = self.decoder(rnn_state, sampled_latent[i])  # [B,N*3]
             sampled_keypoints.append(kp_flat)
-        sampled_keypoints = torch.stack(sampled_keypoints, dim=0)  # [S,B,N*6]
+        sampled_keypoints = torch.stack(sampled_keypoints, dim=0)  # [S,B,N*3]
 
-        return sampled_latent, sampled_keypoints, sampled_latent[0], sampled_keypoints[0]
+        # Return also the first sample (latent and kp) for RNN update consistency
+        return sampled_latent, sampled_keypoints, sampled_latent_mean, sampled_keypoint_mean
 
 
 class KLDivergence(nn.Module):
@@ -433,47 +156,47 @@ class KLDivergence(nn.Module):
         self.register_buffer('train_step', torch.tensor(0.0))
 
     def forward(self, mean_prior, std_prior, mean, std):
-        # Compute KL divergence between two Normal distributions
         kl = kl_divergence(Normal(mean, std), Normal(mean_prior, std_prior)).sum(-1)
-
         if self.kl_annealing_steps > 0:
             weight = min(self.train_step / self.kl_annealing_steps, 1.0)
             kl = kl * weight
-
         return kl
 
     def step(self):
         self.train_step += 1
 
 
-# ========= VRNN Iteration =========
+# ========= One VRNN step =========
 def vrnn_iteration(cfg, input_kp, rnn_state, rnn_cell,
                    prior_net, decoder,
                    posterior_net=None,
-                   sample_best=None, sample_all=None,kl_module=None,
+                   sample_best=None, sample_all=None, kl_module=None,
                    training=True):
+    """
+    input_kp: [B, N, D]
+    rnn_state: [B, H]
+    """
     B, N, D = input_kp.shape
-    observed_kp_flat = input_kp.view(B, -1)
+    observed_kp_flat = input_kp.view(B, -1)  # [B, N*D]
 
     # Prior & Posterior
     mean_prior, std_prior = prior_net(rnn_state)
     if posterior_net is not None:
         mean, std = posterior_net(rnn_state, observed_kp_flat)
-        kl = kl_module(mean_prior, std_prior, mean, std)
+        kl = kl_module(mean_prior, std_prior, mean, std) if kl_module is not None else None
     else:
         mean, std = mean_prior.detach(), std_prior.detach()
         kl = None
 
-    # Sampling
+    # Sampling / decoding
     if training:
-        z, output_flat = sample_best(mean, std, rnn_state, observed_kp_flat)  # [B,L],[B,N*6]
+        z, output_flat = sample_best(mean, std, rnn_state, observed_kp_flat)  # [B,L], [B,N*D]
         output_kp = output_flat.view(B, N, D)
     else:
-        z_all, kp_all, z, output_flat = sample_all(mean, std, rnn_state, observed_kp_flat)
+        z_all, kp_all, z, _ = sample_all(mean, std, rnn_state) #, output_flat
         output_kp = kp_all.view(cfg.num_samples, B, N, D)  # [S,B,N,D]
-        output_flat = output_flat.view(B, -1)
 
-    # Update RNN
+    # Update RNN state (uses the single z chosen above)
     rnn_input = torch.cat([observed_kp_flat, z], dim=-1)
     rnn_state = rnn_cell(rnn_input, rnn_state)
 
@@ -505,9 +228,11 @@ def vrnn_iteration_pred(cfg, input_kp, rnn_state, rnn_cell,
         z, output_flat = sample_best(mean, std, rnn_state, observed_kp_flat)  # [B,L], [B,N*D]
         output_kp = output_flat.view(B, N, D)
     else:
-        z_all, kp_all, z, output_flat = sample_all(mean, std, rnn_state, observed_kp_flat)
+        z_all, kp_all, z, kp = sample_all(mean, std, rnn_state) #, output_flat
         output_kp = kp_all.view(cfg.num_samples, B, N, D)  # [S,B,N,D]
-        output_flat = output_flat.view(B, -1)
+        #output_flat = output_flat.view(B, -1)
+        #output_flat = output_kp.mean(axis=0).view(B, -1)
+        output_flat = kp.view(B, -1)
 
     # Update RNN state (uses the single z chosen above)
     if training:
@@ -518,13 +243,14 @@ def vrnn_iteration_pred(cfg, input_kp, rnn_state, rnn_cell,
         rnn_state = rnn_cell(rnn_input, rnn_state)
 
     return output_kp, rnn_state, kl
-                       
+
+
 # ========= VRNN Model =========
 class VRNN(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.rnn_cell = nn.GRUCell(cfg.num_keypoints * 6 + cfg.latent_code_size,
+        self.rnn_cell = nn.GRUCell(cfg.num_keypoints*6 + cfg.latent_code_size,
                                    cfg.num_rnn_units)
         self.prior_net = PriorNet(cfg)
         self.posterior_net = PosteriorNet(cfg)
@@ -540,16 +266,17 @@ class VRNN(nn.Module):
 
     def forward(self, x):
         """
+        Standard teacher-forced pass on a short block:
         x: [B,T,N,D]
         Returns:
-            Training → [B,T,N,D], [B,T_obs] KL
-            Inference → [S,B,T,N,D], None
+            Training  -> ( [B,T,N,D], [B,T_obs] KL )
+            Inference -> ( [S,B,T,N,D], None )
         """
         B, T, N, D = x.shape
         rnn_state = torch.zeros(B, self.cfg.num_rnn_units, device=x.device)
         outputs, kls = [], []
 
-        # Observed steps
+        # Observed steps (posterior)
         for t in range(self.cfg.observed_steps):
             out, rnn_state, kl = vrnn_iteration(
                 self.cfg, x[:, t], rnn_state,
@@ -563,7 +290,7 @@ class VRNN(nn.Module):
             outputs.append(out)
             kls.append(kl)
 
-        # Predicted steps
+        # Predicted steps (prior)
         for t in range(self.cfg.observed_steps, T):
             out, rnn_state, _ = vrnn_iteration_pred(
                 self.cfg, x[:, t], rnn_state,
@@ -577,16 +304,113 @@ class VRNN(nn.Module):
 
         if self.training:
             output_stack = torch.stack(outputs, dim=1)   # [B,T,N,D]
-            kl_stack = torch.stack(kls, dim=1)
+            kl_stack = torch.stack(kls, dim=1) if len(kls) > 0 else None
         else:
+            # outputs are [S,B,N,D] per time -> stack -> [T,S,B,N,D] -> permute -> [S,B,T,N,D]
             output_stack = torch.stack(outputs, dim=2)   # [S,B,T,N,D]
             output_stack = output_stack.permute(1,0,2,3,4)
             kl_stack = None
 
         return output_stack, kl_stack
 
+    # ====== NEW: Overlapping rollout that keeps ALL S samples ======
+    # @torch.no_grad()
+    # def forward(self, x, obs: int = 120, pred: int = 30, stride: int = 30, squeeze_batch_if_added: bool = False):
+    #     """
+    #     Overlapping rollout on a long sequence, keeping ALL S samples per forecast step.
+    
+    #     Accepts x in shapes:
+    #       - [B, T_full, N, D]
+    #       - [T_full, N, D]          (adds B=1)
+    #       - [T_full, N]             (adds D=1 and B=1)
+    
+    #     Returns:
+    #       pred_samples: [S, B, T_full, N, D] with predictions at forecast indices; NaN elsewhere.
+    #                     If squeeze_batch_if_added=True and B was added here, returns [S, T_full, N, D].
+    #     """
+    #     self.eval()
+    
+    #     # ---- normalize to [B,T,N,D] ----
+    #     added_batch = False
+    #     if x.dim() == 2:            # [T,N]  -> [1,T,N,1]
+    #         x = x.unsqueeze(0).unsqueeze(-1)
+    #         added_batch = True
+    #     elif x.dim() == 3:          # [T,N,D] -> [1,T,N,D]
+    #         x = x.unsqueeze(0)
+    #         added_batch = True
+    #     elif x.dim() != 4:
+    #         raise ValueError(f"Expected x with 2/3/4 dims, got {x.shape}")
+    
+    #     x = x.to(next(self.parameters()).device)
+    #     B, T_full, N, D = x.shape
+    
+    #     H = self.cfg.num_rnn_units
+    #     S = self.cfg.num_samples
+    #     device = x.device
+    
+    #     # allocate output
+    #     pred_samples = torch.full((S, B, T_full, N, D), float('nan'), device=device)
+    
+    #     t0 = 0
+    #     while t0 + obs + pred <= T_full:
+    #         rnn_state = torch.zeros(B, H, device=device)
+    #         last_kp = None  # [B,N,D]
+    
+    #         for i in range(obs + pred):
+    #             cur_t = t0 + i
+    
+    #             # context: ground truth + posterior; forecast: model output + prior
+    #             if i < obs:
+    #                 input_kp = x[:, cur_t]             # [B,N,D]
+    #                 post = self.posterior_net
+    #             else:
+    #                 input_kp = x[:, t0 + obs - 1] if last_kp is None else last_kp
+    #                 post = None
+    
+    #             # single step (inference mode): out is [S,B,N,D]
+    #             out, rnn_state, _ = vrnn_iteration(
+    #                 self.cfg,
+    #                 input_kp,
+    #                 rnn_state,
+    #                 self.rnn_cell,
+    #                 self.prior_net,
+    #                 self.decoder,
+    #                 posterior_net=post,
+    #                 sample_best=self.sample_best,
+    #                 sample_all=self.sample_all,
+    #                 training=False
+    #             )
+    
+    #             # advance autoregressively with sample-0
+    #             last_kp = out[0]  # [B,N,D]
+    
+    #             # record only forecast portion (keep ALL S samples)
+    #             if i >= obs:
+    #                 pred_samples[:, :, cur_t] = out  # [S,B,N,D] -> time index cur_t
+    
+    #         t0 += stride
+    
+    #     # optionally squeeze the batch dim if we added it here
+    #     if added_batch and squeeze_batch_if_added:
+    #         pred_samples = pred_samples.squeeze(1)  # [S, T_full, N, D]
+    
+    #     return pred_samples
+
+
+
+# ========= Utils =========
 def init_weights(m):
     if isinstance(m, nn.Linear):
         nn.init.xavier_uniform_(m.weight)
         if m.bias is not None:
             nn.init.zeros_(m.bias)
+
+
+# ========= Convenience wrapper for your 120/30/30 schedule =========
+def vrnn_overlap_predict(model: VRNN, x):
+    """
+    Convenience wrapper for 120-in / 30-out with stride 30.
+    x: [B, T_full, N, D]
+    Returns: [S, B, T_full, N, D] with NaNs outside forecast indices.
+    """
+    return model.rollout_overlapping(x, obs=120, pred=30, stride=30)
