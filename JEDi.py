@@ -96,7 +96,7 @@ class BaseVideoDataset(Dataset):
         #frames = self._truncate_to_multiple_of_12(frames)
 
         # Apply padding
-        frames = self._pad_to_1224_frames(frames)
+        #frames = self._pad_to_1224_frames(frames)
 
         #print(f"✅ Video: {file_path}, Frames After Processing: {frames.shape[0]}")
 
