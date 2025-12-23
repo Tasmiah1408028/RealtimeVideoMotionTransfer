@@ -17,7 +17,7 @@ https://github.com/AliaksandrSiarohin/first-order-model.
 
 2. The subfolder PREDICTOR contains prediction functions using VRNN.
 
-The config subfolder contains the yaml file for the VoxCeleb dataset.
+The config subfolder contains the yaml file for the Bair dataset.
 
 The checkpoints subfolder contains the trained VRNN keypoins prediction models using prediction horizons of 6 or 12 for VRNN.
 Checkpoints for VRNN are named as "VRNN\_5001videos_bair_{# input frames}_{# output frames}" where {# input frames} and {# output frames} is 15 here.
