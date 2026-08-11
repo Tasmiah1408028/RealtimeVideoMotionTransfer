@@ -31,7 +31,7 @@ To calculate JEDi, JEDi.py can be used after generating the videos and some trai
 3. To avail the source image for generating videos in reconstruction mode and to evaluate the quality of generated videos, the ground truth videos can be found under this google drive link.
 https://drive.google.com/drive/folders/1Zn9ANeLadblbuScp_t_WmmViR85o-CVo?usp=sharing
 
-To run this file in the attached Jupyter notebooks, please copy the checkpoint file to the following path "Training_Prediction/FOMM/datasets/bair/test/".
+To run this file in the attached Jupyter notebooks, please copy the videos to the following path "Training_Prediction/FOMM/datasets/bair/test/".
 
 ## Checkpoints for the FOMM model and keypoints 
 Checkpoints for the FOMM model trained on the Bair dataset can be found under this google drive link. 
